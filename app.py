@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
+import pandas as pd
 import streamlit as st
 
 from src.alertas import calcular_alertas
@@ -12,17 +15,61 @@ from src.kpis import calcular_kpis
 st.set_page_config(page_title="Sistema Recupero Subsidios", layout="wide")
 st.title("Sistema de Recupero de Subsidios")
 
+GESTION_COLUMNS = [
+    "EMPRESA",
+    "DNI",
+    "APELLIDOS Y NOMBRES",
+    "TIPO DE SUBSIDIO",
+    "FECHA DE INICIO",
+    "FECHA FIN",
+    "TOTAL DIAS",
+    "VENCIMIENTO DE EXPEDIENTE",
+    "STATUS PLATAFORMA VIVA",
+    "STATUS TRABAJADORA SOCIAL",
+    "STATUS EBE",
+    "EXPEDIENTE",
+    "IMPORTE SOLICITADO",
+    "IMPORTE REEMBOLSADO POR ESSALUD",
+    "DIFERENCIA S/. A FAVOR",
+    "DIFERENCIA S/. EN CONTRA",
+    "FECHA ULTIMA ACCION",
+    "DETALLE DE RPTA ESSALUD OBSERVACIÓN",
+    "FECHA DE COBRO (CONTABILIDAD)",
+    "AÑO DE COBRO (CONTABILIDAD)",
+    "MES DE COBRO (CONTABILIDAD)",
+]
+
+
+def _columnas_presentes(df: pd.DataFrame, orden: list[str]) -> list[str]:
+    return [col for col in orden if col in df.columns]
+
+
+def _build_excel_report(gestion_df: pd.DataFrame, detalle_df: pd.DataFrame) -> bytes:
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        gestion_df.to_excel(writer, index=False, sheet_name="GESTION")
+        detalle_df.to_excel(writer, index=False, sheet_name="DETALLE")
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 archivo = st.file_uploader("Cargar archivo Excel", type=["xlsx"])
 
 if archivo is not None:
     try:
-        df = cargar_excel(archivo)
+        df, faltantes_opcionales = cargar_excel(archivo)
         df = calcular_consecutividad(df)
         df = calcular_alertas(df)
         kpis = calcular_kpis(df)
     except ValueError as exc:
         st.error(str(exc))
         st.stop()
+
+    if faltantes_opcionales:
+        st.warning(
+            "Faltan columnas opcionales para la vista de gestión: "
+            + ", ".join(faltantes_opcionales)
+        )
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total casos", kpis["total_casos"])
@@ -40,8 +87,8 @@ if archivo is not None:
     alertas = ["Todas"] + sorted(df["alerta"].dropna().unique().tolist())
 
     f1, f2, f3 = st.columns(3)
-    filtro_estado = f1.multiselect("Estado", options=estados, default=[])
-    filtro_agente = f2.multiselect("Agente", options=agentes, default=[])
+    filtro_estado = f1.multiselect("Estado plataforma", options=estados, default=[])
+    filtro_agente = f2.multiselect("Trabajadora social", options=agentes, default=[])
     filtro_alerta = f3.selectbox("Alerta", options=alertas, index=0)
 
     filtrado = df.copy()
@@ -52,29 +99,41 @@ if archivo is not None:
     if filtro_alerta != "Todas":
         filtrado = filtrado[filtrado["alerta"] == filtro_alerta]
 
-    columnas_tabla = [
-        "id",
-        "fecha_registro",
-        "fecha_ultimo_mov",
-        "estado",
-        "subestado",
-        "caso",
-        "dias_sin_mov",
-        "prioridad_consecutividad",
-        "alerta",
-        "agente",
-        "monto",
-    ]
+    columnas_tabla = _columnas_presentes(filtrado, GESTION_COLUMNS)
 
-    st.subheader("Casos")
-    st.dataframe(filtrado[columnas_tabla], use_container_width=True, hide_index=True)
+    st.subheader("Gestión de casos")
+    if columnas_tabla:
+        st.dataframe(filtrado[columnas_tabla], use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay columnas de gestión disponibles para mostrar.")
 
-    st.subheader("Detalle de caso")
-    ids = filtrado["id"].astype(str).tolist()
-    if ids:
-        id_seleccionado = st.selectbox("Seleccionar ID", options=ids)
-        detalle = filtrado[filtrado["id"].astype(str) == id_seleccionado].iloc[0]
-        st.json({k: str(v) for k, v in detalle.to_dict().items()})
+    if not filtrado.empty:
+        reporte_excel = _build_excel_report(
+            gestion_df=filtrado[columnas_tabla] if columnas_tabla else pd.DataFrame(),
+            detalle_df=filtrado[df.columns],
+        )
+        st.download_button(
+            "Descargar reporte Excel (.xlsx)",
+            data=reporte_excel,
+            file_name="reporte_recupero_subsidios.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with st.expander("Ver detalle del caso seleccionado"):
+            opciones = {
+                f"{str(row.get('APELLIDOS Y NOMBRES', 'Sin nombre'))} | DNI {str(row.get('DNI', 'Sin DNI'))}": idx
+                for idx, row in filtrado.iterrows()
+            }
+            seleccionado = st.selectbox(
+                "Seleccionar caso",
+                options=list(opciones.keys()),
+                index=None,
+                placeholder="Seleccione un caso para ver su detalle",
+            )
+            if seleccionado:
+                idx = opciones[seleccionado]
+                detalle = filtrado.loc[idx, df.columns]
+                st.dataframe(detalle.to_frame("Valor"), use_container_width=True)
     else:
         st.info("No hay casos para los filtros seleccionados.")
 else:
