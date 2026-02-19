@@ -1,44 +1,52 @@
 # Sistema de Recupero de Subsidios (Streamlit)
 
-Este proyecto mantiene **Streamlit** como capa de interfaz (`app.py`) y separa la lógica de negocio en módulos reutilizables para facilitar una futura migración a FastAPI.
+Este proyecto usa **Streamlit** como interfaz (`app.py`) y mantiene la lógica de negocio en módulos (`src/*`) para facilitar mantenimiento y evolución.
 
 ## Estructura
 
-- `app.py`: UI (carga de archivo, filtros, render de tabla y detalle).
-- `src/io_excel.py`: carga de Excel y validación de columnas requeridas.
+- `app.py`: UI de gestión, filtros, tabla principal, detalle opcional y descarga Excel.
+- `src/io_excel.py`: lectura de Excel, validación de columnas mínimas y preparación de campos internos.
 - `src/casos.py`: motor de casos, clasificación y consecutividad.
 - `src/alertas.py`: reglas de alertas Nivel 1 (vencimiento) y Nivel 2 (estancamiento).
 - `src/kpis.py`: cálculo de KPIs del tablero.
 
-## Reglas funcionales incluidas
-
-- Casos con estado de cierre (`cerrado`, `finalizado`, `pagado`) se clasifican como `Cierre`.
-- Nivel 2 - Estancamiento: caso abierto con `dias_sin_mov >= 15`.
-- Nivel 1 - Vencimiento: caso abierto con `dias_sin_mov >= 30`.
-- El Nivel 1 tiene prioridad visual sobre Nivel 2 cuando ambas condiciones se cumplen.
-
 ## Requisitos
-
-Instalar dependencias:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Ejecución
+## Cómo correr
 
 ```bash
 streamlit run app.py
 ```
 
-## Formato esperado del Excel
+## Formato del Excel
 
-Columnas requeridas (se normalizan en minúscula y con `_`):
+La aplicación trabaja con cabeceras en español (respetando tildes, espacios y paréntesis), por ejemplo:
 
-- `id`
-- `fecha_registro`
-- `fecha_ultimo_mov`
-- `estado`
-- `subestado`
-- `agente`
-- `monto`
+- `APELLIDOS Y NOMBRES`
+- `STATUS PLATAFORMA VIVA`
+- `DETALLE DE RPTA ESSALUD OBSERVACIÓN`
+- `FECHA DE COBRO (CONTABILIDAD)`
+
+### Columnas mínimas requeridas (core)
+
+Para poder analizar, el archivo debe incluir al menos:
+
+- `DNI`
+- `APELLIDOS Y NOMBRES`
+- `FECHA DE INICIO`
+- `FECHA FIN`
+- `VENCIMIENTO DE EXPEDIENTE`
+- `STATUS PLATAFORMA VIVA`
+
+Si faltan otras columnas de gestión no-core, la app **no bloquea** la carga: muestra un aviso de columnas opcionales faltantes.
+
+## Descarga de reporte
+
+El botón **Descargar reporte Excel (.xlsx)** genera un archivo con 2 hojas:
+
+1. `GESTION`: columnas visibles en la tabla principal y con filtros aplicados.
+2. `DETALLE`: todas las columnas originales del Excel para los registros filtrados.
